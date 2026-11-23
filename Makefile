@@ -7,18 +7,9 @@ NVCC        := nvcc
 CXX         := g++
 CUDA_PATH   ?= /usr/local/cuda
 
-# Target GPU Architectures (Volta, Turing, Ampere, Ada Lovelace)
-GENCODE_SM70 := -gencode arch=compute_70,code=sm_70
-GENCODE_SM75 := -gencode arch=compute_75,code=sm_75
-GENCODE_SM80 := -gencode arch=compute_80,code=sm_80
-GENCODE_SM86 := -gencode arch=compute_86,code=sm_86
-GENCODE_SM89 := -gencode arch=compute_89,code=sm_89
-
-GENCODE_FLAGS := $(GENCODE_SM70) $(GENCODE_SM75) $(GENCODE_SM80) $(GENCODE_SM86) $(GENCODE_SM89)
-
 # Compiler Flags
 CXXFLAGS    := -std=c++17 -O3 -Wall -Wextra
-NVCCFLAGS   := -std=c++17 -O3 $(GENCODE_FLAGS) --expt-relaxed-constexpr -Xcompiler -Wall
+NVCCFLAGS   := -std=c++17 -O3 --expt-relaxed-constexpr -Xcompiler -Wall
 
 # Include and Library Paths
 INCLUDES    := -Iinclude -I$(CUDA_PATH)/include
@@ -38,13 +29,10 @@ SRCS_CPP    := $(SRC_DIR)/main.cpp \
                $(SRC_DIR)/npp_pipeline.cpp \
                $(SRC_DIR)/pipeline_manager.cpp
 
-SRCS_CU     := $(SRC_DIR)/custom_kernels.cu
-
 # Object Files
-OBJS        := $(patsubst $(SRC_DIR)/%.cpp, $(BUILD_DIR)/%.o, $(SRCS_CPP)) \
-               $(patsubst $(SRC_DIR)/%.cu, $(BUILD_DIR)/%.o, $(SRCS_CU))
+OBJS        := $(patsubst $(SRC_DIR)/%.cpp, $(BUILD_DIR)/%.o, $(SRCS_CPP))
 
-.PHONY: all clean run test benchmark dataset dirs
+.PHONY: all clean run benchmark dataset dirs
 
 all: dirs $(TARGET)
 
@@ -55,10 +43,6 @@ dirs:
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.cpp
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
-# Compile CUDA .cu files
-$(BUILD_DIR)/%.o: $(SRC_DIR)/%.cu
-	$(NVCC) $(NVCCFLAGS) $(INCLUDES) -c $< -o $@
-
 # Link executable
 $(TARGET): $(OBJS)
 	$(NVCC) $(NVCCFLAGS) $(OBJS) $(LDFLAGS) -o $@
@@ -68,13 +52,9 @@ $(TARGET): $(OBJS)
 dataset:
 	python3 tools/generate_dataset.py
 
-# Run batch pipeline on full dataset
+# Run batch NPP rotation on full dataset
 run: $(TARGET)
-	./$(TARGET) --input_dir data/input --output_dir output --streams 4 --operation all
-
-# Run correctness verification against CPU
-verify: $(TARGET)
-	./$(TARGET) --input_dir data/input --output_dir output --streams 4 --operation sobel --cpu_verify
+	./$(TARGET) --input_dir data/input --output_dir output --streams 4 --operation rotate --angle 45.0
 
 # Run multi-stream scaling benchmark
 benchmark: $(TARGET)

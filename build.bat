@@ -2,7 +2,7 @@
 setlocal enabledelayedexpansion
 
 echo ======================================================================
-echo    Building CUDA Enterprise Pipeline with NVCC (Windows x64)
+echo    Building CUDA Enterprise NPP Pipeline with NVCC (Windows x64)
 echo ======================================================================
 
 if not exist bin mkdir bin
@@ -18,15 +18,14 @@ if not exist %VCVARS% (
 echo [*] Initializing Visual Studio build environment...
 call %VCVARS% >nul 2>&1
 
-echo [*] Compiling CUDA sources with NVCC...
-nvcc -std=c++17 -O3 -arch=sm_89 ^
+echo [*] Compiling C++ and CUDA sources with NVCC...
+nvcc -std=c++17 -O3 ^
     -Iinclude -I"%CUDA_PATH%\include" ^
     src\main.cpp ^
     src\cli_parser.cpp ^
     src\image_io.cpp ^
     src\npp_pipeline.cpp ^
     src\pipeline_manager.cpp ^
-    src\custom_kernels.cu ^
     -L"%CUDA_PATH%\lib\x64" ^
     -lcudart -lnppc -lnppig -lnppif -lnppial -lnpps ^
     -o bin\cuda_enterprise_pipeline.exe

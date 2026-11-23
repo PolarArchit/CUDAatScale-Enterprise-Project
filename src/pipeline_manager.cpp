@@ -25,7 +25,6 @@
 #include "benchmark.h"
 #include "cli_parser.h"
 #include "cuda_common.h"
-#include "custom_kernels.cuh"
 #include "image.h"
 #include "image_io.h"
 #include "npp_pipeline.h"
@@ -34,7 +33,6 @@ namespace cuda_scale {
 
 namespace {
 
-// Default initial allocation dimension for pitched buffers (1024x1024).
 constexpr int kInitialWidth = 1024;
 constexpr int kInitialHeight = 1024;
 
@@ -86,7 +84,6 @@ void PipelineManager::EnsureDeviceCapacity(StreamResource* res, int width, int h
   if (res->d_output) CUDA_CHECK(cudaFree(res->d_output));
   if (res->d_intermediate) CUDA_CHECK(cudaFree(res->d_intermediate));
 
-  // Allocate 2D pitched device memory with 3 bytes/pixel capacity for max channels.
   CUDA_CHECK(cudaMallocPitch(reinterpret_cast<void**>(&res->d_input),
                              &res->input_pitch,
                              new_w * 3, new_h));
@@ -171,7 +168,6 @@ bool PipelineManager::RunBatch() {
             << options_.device_id << "\n"
             << "======================================================================\n";
 
-  // Data structure to track in-flight tasks assigned to each stream.
   struct InFlightTask {
     std::string filepath;
     std::string out_filepath;
@@ -189,7 +185,6 @@ bool PipelineManager::RunBatch() {
     auto& res = stream_pool_[s_idx];
     CUDA_CHECK(cudaStreamSynchronize(res.stream));
 
-    // Retrieve asynchronous timing events.
     float h2d_ms = 0.0f;
     float kernel_ms = 0.0f;
     float d2h_ms = 0.0f;
@@ -197,29 +192,10 @@ bool PipelineManager::RunBatch() {
     CUDA_CHECK(cudaEventElapsedTime(&kernel_ms, res.kernel_start, res.kernel_end));
     CUDA_CHECK(cudaEventElapsedTime(&d2h_ms, res.d2h_start, res.d2h_end));
 
-    // Copy data from pinned output buffer into output image.
     std::memcpy(task.output_image.data.data(), res.pinned_host_out,
                 task.output_image.SizeInBytes());
 
-    // Save processed image to disk.
     SaveImageFile(task.out_filepath, task.output_image);
-
-    // Optional CPU reference verification.
-    double cpu_time_ms = 0.0;
-    double psnr_val = 0.0;
-    if (options_.verify_with_cpu) {
-      Timer cpu_timer;
-      Image cpu_out;
-      if (options_.operation == OperationMode::kSobel) {
-        CpuSobelFilter(task.input_image, &cpu_out);
-        cpu_time_ms = cpu_timer.ElapsedMilliseconds();
-        psnr_val = ComputePSNR(task.output_image, cpu_out);
-      } else if (options_.operation == OperationMode::kBlur) {
-        CpuBoxFilter(task.input_image, &cpu_out);
-        cpu_time_ms = cpu_timer.ElapsedMilliseconds();
-        psnr_val = ComputePSNR(task.output_image, cpu_out);
-      }
-    }
 
     ImageBenchmarkRecord rec;
     rec.filename = std::filesystem::path(task.filepath).filename().string();
@@ -227,24 +203,18 @@ bool PipelineManager::RunBatch() {
     rec.height = task.input_image.height;
     rec.channels = task.input_image.channels;
     rec.h2d_ms = h2d_ms;
-    rec.kernel_ms = kernel_ms;
+    rec.compute_ms = kernel_ms;
     rec.d2h_ms = d2h_ms;
     rec.total_ms = h2d_ms + kernel_ms + d2h_ms;
-    rec.cpu_ref_ms = cpu_time_ms;
-    rec.psnr_db = psnr_val;
 
     reporter_.AddRecord(rec);
 
-    std::cout << " [Processed] " << std::left << std::setw(24) << rec.filename
+    std::cout << " [Processed NPP] " << std::left << std::setw(22) << rec.filename
               << " | " << rec.width << "x" << rec.height << " (" << rec.channels << "ch)"
               << " | H2D: " << std::fixed << std::setprecision(2) << rec.h2d_ms << "ms"
-              << " | Kernel: " << rec.kernel_ms << "ms"
+              << " | NPP: " << rec.compute_ms << "ms"
               << " | D2H: " << rec.d2h_ms << "ms"
-              << " | Stream: " << s_idx;
-    if (options_.verify_with_cpu && psnr_val > 0.0) {
-      std::cout << " | PSNR: " << std::setprecision(1) << psnr_val << "dB";
-    }
-    std::cout << "\n";
+              << " | Stream: " << s_idx << "\n";
 
     task.active = false;
   };
@@ -256,12 +226,10 @@ bool PipelineManager::RunBatch() {
     auto& res = stream_pool_[stream_idx];
     auto& task = in_flight[stream_idx];
 
-    // If stream is already executing a previous task, wait and complete it.
     if (task.active) {
       complete_task(stream_idx);
     }
 
-    // Load next image from file.
     task.filepath = file_paths[i];
     std::string filename = std::filesystem::path(task.filepath).filename().string();
     task.out_filepath = (std::filesystem::path(options_.output_dir) /
@@ -280,7 +248,6 @@ bool PipelineManager::RunBatch() {
     EnsureDeviceCapacity(&res, w, h);
     EnsurePinnedCapacity(&res, task.input_image.SizeInBytes());
 
-    // Copy host image into pinned host memory for asynchronous DMA transfer.
     std::memcpy(res.pinned_host_in, task.input_image.data.data(),
                 task.input_image.SizeInBytes());
 
@@ -292,7 +259,7 @@ bool PipelineManager::RunBatch() {
                                  cudaMemcpyHostToDevice, res.stream));
     CUDA_CHECK(cudaEventRecord(res.h2d_end, res.stream));
 
-    // Stage 2: GPU Computation (Custom Kernel / NPP)
+    // Stage 2: NVIDIA NPP Library Execution
     CUDA_CHECK(cudaEventRecord(res.kernel_start, res.stream));
     uint8_t* final_output_d = res.d_output;
 
@@ -304,32 +271,22 @@ bool PipelineManager::RunBatch() {
         final_output_d = res.d_output;
         break;
 
-      case OperationMode::kBlur:
+      case OperationMode::kFilter:
         ExecuteNppBoxFilter(res.d_input, res.input_pitch,
                             res.d_output, res.output_pitch,
                             w, h, c, 3, res.stream);
         final_output_d = res.d_output;
         break;
 
-      case OperationMode::kSobel:
-        LaunchGpuSobelFilter(res.d_input, res.input_pitch,
-                             res.d_output, res.output_pitch,
-                             w, h, res.stream);
-        final_output_d = res.d_output;
-        break;
-
       case OperationMode::kAll:
-        // Multi-stage enterprise pipeline: BoxFilter -> Rotate -> Sobel
+        // Pipelined: Box Filter -> Rotation
         ExecuteNppBoxFilter(res.d_input, res.input_pitch,
                             res.d_intermediate, res.intermediate_pitch,
                             w, h, c, 3, res.stream);
         ExecuteNppRotate(res.d_intermediate, res.intermediate_pitch,
                          res.d_output, res.output_pitch,
                          w, h, c, options_.rotation_angle, res.stream);
-        LaunchGpuSobelFilter(res.d_output, res.output_pitch,
-                             res.d_intermediate, res.intermediate_pitch,
-                             w, h, res.stream);
-        final_output_d = res.d_intermediate;
+        final_output_d = res.d_output;
         break;
     }
     CUDA_CHECK(cudaEventRecord(res.kernel_end, res.stream));
@@ -345,7 +302,6 @@ bool PipelineManager::RunBatch() {
     task.active = true;
   }
 
-  // Drain any remaining active tasks across all streams.
   for (int s = 0; s < options_.num_streams; ++s) {
     if (in_flight[s].active) {
       complete_task(s);
@@ -354,13 +310,11 @@ bool PipelineManager::RunBatch() {
 
   double total_wall_ms = wall_clock.ElapsedMilliseconds();
 
-  // Export CSV results.
   std::string csv_path = (std::filesystem::path(options_.output_dir) /
                           "benchmark_results.csv").string();
   reporter_.ExportToCSV(csv_path);
   std::cout << "[Pipeline] Detailed CSV benchmark exported to: " << csv_path << "\n";
 
-  // Print formatted summary.
   reporter_.PrintSummary(total_wall_ms, options_.num_streams);
 
   return true;
@@ -371,30 +325,24 @@ bool PipelineManager::RunBenchmarkSuite() {
             << "              RUNNING COMPREHENSIVE BENCHMARK SUITE                   \n"
             << "======================================================================\n";
 
-  // Run with 1 stream (sequential GPU execution baseline)
   PipelineOptions opt_1 = options_;
   opt_1.num_streams = 1;
-  opt_1.verify_with_cpu = true;
   PipelineManager mgr_1(opt_1);
   mgr_1.Initialize();
   Timer t1;
   mgr_1.RunBatch();
   double time_1_stream = t1.ElapsedMilliseconds();
 
-  // Run with 4 streams (multi-stream concurrent pipeline)
   PipelineOptions opt_4 = options_;
   opt_4.num_streams = 4;
-  opt_4.verify_with_cpu = false;
   PipelineManager mgr_4(opt_4);
   mgr_4.Initialize();
   Timer t4;
   mgr_4.RunBatch();
   double time_4_stream = t4.ElapsedMilliseconds();
 
-  // Run with 8 streams
   PipelineOptions opt_8 = options_;
   opt_8.num_streams = 8;
-  opt_8.verify_with_cpu = false;
   PipelineManager mgr_8(opt_8);
   mgr_8.Initialize();
   Timer t8;

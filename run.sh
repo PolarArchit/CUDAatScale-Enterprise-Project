@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Execution script for Enterprise CUDA Image Processing Pipeline
+# Execution script for Enterprise CUDA NPP Image Processing Pipeline
 # Designed for Coursera Linux Lab and Peer Grading Evaluation
 # ==============================================================================
 
@@ -30,17 +30,17 @@ if [ $# -gt 0 ]; then
     echo "[run.sh] Executing pipeline with custom arguments: $@"
     ./"$BIN_PATH" "$@"
 else
-    echo "[run.sh] Executing standard enterprise batch workflow across all images..."
+    echo "[run.sh] Executing standard enterprise batch NPP rotation workflow across all images..."
     ./"$BIN_PATH" \
         --input_dir data/input \
         --output_dir output \
         --streams 4 \
-        --operation all \
+        --operation rotate \
         --angle 45.0 \
         | tee artifacts/execution_proof.log
 
     echo ""
-    echo "[run.sh] Executing concurrency and scaling benchmark..."
+    echo "[run.sh] Executing multi-stream scaling benchmark..."
     ./"$BIN_PATH" \
         --input_dir data/input \
         --output_dir output \

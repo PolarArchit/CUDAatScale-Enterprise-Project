@@ -19,24 +19,22 @@
 
 namespace cuda_scale {
 
-// Processing operation mode.
+// Processing operation mode using NVIDIA Performance Primitives (NPP).
 enum class OperationMode {
-  kRotate,  // NPP Geometric Rotation (nppiRotate)
-  kBlur,    // NPP Box/Gaussian Spatial Filter (nppiFilterBox)
-  kSobel,   // Custom CUDA Shared-Memory Sobel 2D Edge Detection
-  kAll      // Multi-stage complete pipeline (Blur -> Rotate -> Sobel)
+  kRotate,  // NVIDIA NPP Image Rotation (nppiRotate)
+  kFilter,  // NVIDIA NPP Spatial Box Filter (nppiFilterBox)
+  kAll      // Full NPP Multi-Stage Pipeline (Filter + Rotate)
 };
 
 // Configuration options parsed from command-line arguments.
 struct PipelineOptions {
   std::string input_dir = "data/input";
   std::string output_dir = "output";
-  OperationMode operation = OperationMode::kAll;
+  OperationMode operation = OperationMode::kRotate;
   double rotation_angle = 45.0;
   int num_streams = 4;
   int batch_size = 0;  // 0 means process all available images.
   bool run_benchmark = false;
-  bool verify_with_cpu = false;
   int device_id = 0;
   bool show_help = false;
 };
