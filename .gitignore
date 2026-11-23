@@ -1,0 +1,23 @@
+# Build directories
+build/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+*.vcxproj*
+*.sln
+.vs/
+*.pdb
+*.obj
+*.o
+
+# Executables
+bin/*.exe
+bin/cuda_enterprise_pipeline
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Keep output and artifact files as required by Coursera rubric
+!output/
+!artifacts/
