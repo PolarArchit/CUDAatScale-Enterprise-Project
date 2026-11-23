@@ -11,9 +11,8 @@
 
 ## 2. Public Code Repository URL
 ```
-<INSERT_YOUR_PUBLIC_GITHUB_REPO_URL_HERE>
+https://github.com/PolarArchit/CUDAatScale-Enterprise-Project
 ```
-*(Example: `https://github.com/your-username/CUDAatScale-Enterprise-Project`)*
 
 ---
 
