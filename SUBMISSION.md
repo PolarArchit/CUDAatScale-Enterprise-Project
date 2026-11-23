@@ -52,10 +52,26 @@ Tested on an **NVIDIA GeForce RTX 4060 GPU** processing all **125 images** in a 
 
 ---
 
-### E. Engineering Challenges & Lessons Learned
-1. **NPP Memory Step Constraints**: Passing unpitched memory pointers to NPP resulted in `NPP_STEP_ERROR` due to row misalignments. Switching to `cudaMallocPitch` and passing device pitch resolved all alignment issues.
-2. **Overcoming DMA Serialization**: Standard pageable memory forced the CUDA driver to perform staged synchronous memory copies. Allocating pinned host buffers enabled true full-duplex asynchronous streaming.
-3. **Circular Stream Scheduling**: Synchronizing streams after each image would collapse execution into single-stream sequential time. Staggering stream completion through a circular task queue provided the latency slack necessary to overlap transfers with computation.
+### E. Engineering Challenges, Debugging & Lessons Learned
+
+1. **The Rotation "Corner-Shift" Defect & Coordinate Centering**:
+   * *Problem Encountered:* During initial test runs of $45^\circ$ image rotation via `nppiRotate`, visual inspection of the output images revealed a defect: the rotated pattern was severely shifted into the top-right corner of the image canvas, leaving the majority of the frame blank black space. Because computer graphics coordinate systems place $(0, 0)$ at the top-left with positive $Y$ extending downward, applying standard textbook 2D rotation formulas around $(w/2, h/2)$ produced an incorrect translation offset in NPP's coordinate space.
+   * *Debugging & Resolution:* Upon inspecting the generated artifact (`comparison_sample_checkerboard_512.png`), I caught the visual displacement. To resolve it, I integrated NVIDIA's official geometric utility primitive `nppiGetRotateBound()`. This routine computes the exact axis-aligned bounding box coordinates ($[X_{\min}, X_{\max}]$, $[Y_{\min}, Y_{\max}]$) of the rotated quadrilateral. By calculating the offset shifts as:
+     $$\text{shift}_x = -aBoundingBox[0][0] + \frac{\text{width} - \text{bound}_w}{2.0}$$
+     $$\text{shift}_y = -aBoundingBox[0][1] + \frac{\text{height} - \text{bound}_h}{2.0}$$
+     the transformed image was perfectly centered into a symmetrical, centered diamond octagon within the destination frame.
+
+2. **NPP Memory Step Constraints (`NPP_STEP_ERROR`)**:
+   * *Problem Encountered:* Passing unpitched 1D contiguous memory buffers to NPP resulted in runtime crashes with `NPP_STEP_ERROR` due to row stride misalignments.
+   * *Resolution:* Switched to pitched device memory allocations via `cudaMallocPitch` and transferred data via `cudaMemcpy2DAsync`. Passing the hardware pitch to NPP guaranteed 128-byte alignment and optimal memory coalescing.
+
+3. **Overcoming DMA Transfer Serialization**:
+   * *Problem Encountered:* Standard pageable memory forced the CUDA driver to perform staged synchronous copies, preventing streams from running concurrently.
+   * *Resolution:* Staged all images in page-locked pinned host memory (`cudaHostAlloc`), allowing the GPU's DMA engines to transfer data concurrently over PCIe while compute cores execute.
+
+4. **Circular Stream Scheduling for Latency Hiding**:
+   * *Problem Encountered:* Synchronizing streams after each image dispatch collapsed execution into serialized single-stream performance.
+   * *Resolution:* Built an in-flight circular task queue of depth $K$ that only synchronizes a stream when it is reused on the next batch cycle, providing the latency slack required to hide PCIe transfer times.
 
 ---
 

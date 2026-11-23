@@ -62,8 +62,24 @@ Total Mean Latency per Image: 0.269 ms
 
 ---
 
-## 5. Artifact Audit Trail
+## 5. Engineering Challenges & Debugging Insights
+
+### A. The Rotation "Corner-Shift" Defect & Coordinate Centering
+* **Defect Identified:** During initial test runs of $45^\circ$ rotation using `nppiRotate`, visual output inspection revealed that the rotated image was displaced into the top-right corner, leaving most of the canvas blank black space. Because image coordinates place $(0,0)$ at the top-left with positive $Y$ pointing downwards, applying standard textbook rotation formulas around $(w/2, h/2)$ produced an incorrect translation offset.
+* **Resolution:** Visual verification of the generated artifact (`comparison_sample_checkerboard_512.png`) caught the error. It was resolved by integrating NVIDIA's utility primitive `nppiGetRotateBound()`, which computes the exact axis-aligned bounding box of the rotated quadrilateral. Calculating centering shifts based on this bounding box centered the rotated diamond lattice into a clean, symmetrical octagon inside the canvas.
+
+### B. Hardware Memory Pitch Alignment (`NPP_STEP_ERROR`)
+* **Problem:** Allocating unpitched 1D memory buffers caused NPP to fail with `NPP_STEP_ERROR` due to row stride misalignments.
+* **Resolution:** Switched to pitched 2D device allocations via `cudaMallocPitch` and `cudaMemcpy2DAsync`, guaranteeing 128-byte alignment and optimal memory coalescing.
+
+### C. Overcoming DMA Serialization with Pinned Memory
+* **Problem:** Standard pageable host buffers forced the CUDA driver to perform staged synchronous copies, preventing streams from running concurrently.
+* **Resolution:** Staged images in page-locked pinned host memory (`cudaHostAlloc`), enabling the GPU's DMA copy engines to transfer data concurrently over PCIe while compute cores execute.
+
+---
+
+## 6. Artifact Audit Trail
 * **Execution Console Log**: `artifacts/execution_proof.log` (164 KB full verbose execution trace)
 * **Detailed CSV Dataset**: `output/benchmark_results.csv` (125 individual per-file timing and throughput rows)
 * **Processed Images**: `output/processed_*.pgm`, `output/processed_*.ppm` (125 processed binary fixtures)
-* **Visual Artifacts**: `artifacts/comparison_sample_*.pgm` (Side-by-side verification figures)
+* **Visual Artifacts**: `artifacts/comparison_sample_*.png` and `.pgm` (Side-by-side verification figures)

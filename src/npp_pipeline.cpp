@@ -57,15 +57,15 @@ bool ExecuteNppRotate(const uint8_t* d_src, size_t src_pitch,
   NppiRect oSrcROI = {0, 0, width, height};
   NppiRect oDstROI = {0, 0, width, height};
 
-  // Compute shift to center rotation at image center (w/2, h/2).
-  const double rad = angle_degrees * (kPi / 180.0);
-  const double cx = width / 2.0;
-  const double cy = height / 2.0;
-  const double cos_a = std::cos(rad);
-  const double sin_a = std::sin(rad);
+  // Compute bounding box using official NPP utility function to properly center rotated image.
+  double aBoundingBox[2][2];
+  nppiGetRotateBound(oSrcROI, aBoundingBox, angle_degrees, 0.0, 0.0);
 
-  const double shift_x = cx - (cx * cos_a - cy * sin_a);
-  const double shift_y = cy - (cx * sin_a + cy * cos_a);
+  const double bound_w = aBoundingBox[1][0] - aBoundingBox[0][0];
+  const double bound_h = aBoundingBox[1][1] - aBoundingBox[0][1];
+
+  const double shift_x = -aBoundingBox[0][0] + (width - bound_w) / 2.0;
+  const double shift_y = -aBoundingBox[0][1] + (height - bound_h) / 2.0;
 
   NppStreamContext ctx = GetConfiguredStreamContext(stream);
 
